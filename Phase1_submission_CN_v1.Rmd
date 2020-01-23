@@ -53,6 +53,8 @@ x[x == Inf] <- min(x)
 sd <- apply(x, 2 , sd)
 x <- x[,-which(sd < 0.1)]
 
+write.table(x,"/Users/ewilkie/Documents/PrecisionFDA/Data/Sc1_CN_filtered.csv",  sep=",")
+
 unexpo <- x[,order(apply(x, 2 , mean))]
 dim(unexpo)
 

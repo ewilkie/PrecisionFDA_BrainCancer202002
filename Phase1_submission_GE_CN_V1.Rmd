@@ -30,20 +30,20 @@ library(pROC) # for AUC calculations
 
 ```
 
-# Subchallenge 1 - Gene Expression
+# Subchallenge 3 - Gene Expression and CN
 
-## Cleaning data
-
-### Annotation based filtering
-Essentially need to subset the gene list. First extract all genes which are matched based on gene symbol int he HGNC database. This means that there will be other information available for these genes. 
+## Import filtered data from SC1 and SC2
 
 ```{r }
-##Match gene expression to Karyotype,
+## read in patient data
 Phase1_CN_GE_out <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/sc3_Phase1_CN_GE_FeatureMatrix.txt", sep="\t", header=T, row.names=1)
 dim(Phase1_CN_GE_out)
 
 y <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/sc3_Phase1_CN_GE_Outcome.txt", sep="\t", header=T, row.names=1)
-dim(y)
+
+## read filtered data
+GE <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/Sc1_GE_filtered.csv", sep=",")
+CN <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/Sc1_CN_filtered.csv", sep=",")
 
 
 cyto.ind <- grep("^X[0-9]", colnames(Phase1_CN_GE_out))
@@ -52,125 +52,11 @@ dim(cyto)
 exp <- Phase1_CN_GE_out[,-cyto.ind]
 dim(exp)
 
+exp_filt <- exp[,which(colnames(exp) %in% colnames(GE))]
+cn_filt <- cyto[,which(colnames(cyto) %in% colnames(CN))]
 
-## official symbols have - not .
-gene.names_sub <- gsub("\\.", "-",colnames(exp))
+data <- cbind(exp_filt, cn_filt)
 
-## get data from symbol checker - generated from running the web tool (no API avail) on gene.names_sub
-h <- read.xlsx("/Users/ewilkie/Documents/PrecisionFDA/Data/hgnc-symbol-check.xlsx", sheetName=1, header=T)
-
-## find Unmatched
-unmatched <- h[which(h$Match.type == "Unmatched"),]
-print("Number of Unmatched gene names:")
-dim(unmatched)
-#[1] 719   7
-
-## find Alias symbol
-alias <- h[which(h$Match.type == "Alias symbol"),]
-
-## find these can be duplicates of Approved symbol
-dup <- h[which(h$Input %in% alias$Input),]
-dup_name <- as.vector(dup$Input[duplicated(dup$Input)])
-
-## these are not duplicated
-aliasu <- alias[-which(alias$Input %in% dup_name),]
-
-## combine to creat unique
-hu <- h[-which(h$Input %in% alias$Input),]
-hu <- rbind(hu, aliasu)
-dim(hu)
-
-```
-
-### Plotting of expression values for filtered genes 
-Does doing this exclude important information?
-
-```{r }
-unexp <- Phase1_GE[,which(colnames(Phase1_GE) %in% unmatched$Input)]
-dim(unexp)
-
-## order and colour data by mean
-unexpo <- unexp[,order(apply(unexp, 2 , mean))]
-
-## format for plottion
-unexpm <- melt(cbind(rownames(unexpo),unexpo))
-colnames(unexpm)[1] <- "Patient"
-
-gbox <- ggplot(unexpm, aes(variable, value)) + geom_boxplot(position="dodge", outlier.size=.2) + ggtitle("Boxplot of Unmatched Genes with outliers for Gene Exprrssion in cohort") + theme(axis.text.x=element_blank())  + labs(x="Unmatched Gene", y="Expression")
-print(gbox)
-```
-
-### Subset further - Extract only DEGs (p.value < 0.05)
-
-```{r }
-## formatting data
-x <- as.matrix(Phase1_GE[,which(colnames(Phase1_GE) %in% hu$Input)])
-eset <- ExpressionSet(assayData = t(x))
-
-## for comparison
-y <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/sc1_Phase1_GE_Outcome.txt", sep="\t", header=T, row.names=1)
-design <- model.matrix(~y$SURVIVAL_STATUS)
-
-#data <- list(x,y)
-#saveRDS(data, "sc1_Phase1_GE.rds")
-
-## calculate
-fit <- lmFit(eset, design)
-fit <- eBayes(fit, trend=TRUE, robust=TRUE)
-results <- decideTests(fit)
-print(summary(results))
-
-## extract results
-top <- topTable(fit,n=Inf)
-top.sig <- top[which(top$adj.P.Val < 0.05),]
-
-print("Number of DEGs")
-dim(top.sig)
-##[1] 893   7
-
-```
-
-### PLot expression range of DEGs
-
-```{r }
-## boxplot of expresion values for only DEGs
-sig <- x[,which(colnames(x) %in% rownames(top.sig))]
-
-## format for plottion
-unexpm <- melt(sig)
-colnames(unexpm) <- c("Patient", "variable", "value")
-
-## to get order by mean
-unexpm$variable <- factor(unexpm$variable, ordered = FALSE )
-unexpm$variable <- ordered(unexpm$variable, levels = colnames(sig)[order(apply(sig, 2 , mean))])
-
-## plot data
-gbox <- ggplot(unexpm, aes(variable, value)) + geom_boxplot(position="dodge", outlier.size=.2)  + ggtitle("Boxplot with outliers for Gene Exprrssion in cohort") + theme(axis.text.x=element_blank())  + labs(x="Gene", y="Expression")
-print(gbox)
-```
-
-### Extract Properties from DEGs
-
-Properties of interest are mean(expression) > 6 and SD > mean(sd(DEG)) for each gene
-
-
-```{r }
-## perform filtering
-sub_by_mean <- x[,which(apply(x,2,mean) > 6)]
-sub_by_sd <- sub_by_mean[,which(apply(sub_by_mean,2,sd) > mean(apply(sig,2,sd)))]
-dim(sub_by_sd)
-
-## format for plottion
-unexpm <- melt(sub_by_sd)
-colnames(unexpm) <- c("Patient", "variable", "value")
-
-## to get order by mean
-unexpm$variable <- factor(unexpm$variable, ordered = FALSE )
-unexpm$variable <- ordered(unexpm$variable, levels = colnames(sig)[order(apply(sig, 2 , mean))])
-
-## plot data
-gbox <- ggplot(unexpm, aes(variable, value)) + geom_boxplot(position="dodge", outlier.size=.2)  + ggtitle("Boxplot with outliers for Gene Expression in samples used for modelling") + theme(axis.text.x=element_blank())  + labs(x="Gene", y="Expression")
-print(gbox)
 ```
 
 
@@ -193,7 +79,7 @@ set.seed(5627)
 options(expressions = 5e5)
 
 ## format data
-x_sub <- sub_by_sd
+x_sub <- data
 data <- merge(x_sub, y, by="row.names")
 rownames(data) <- data[,1]
 data <- data[,-1]
