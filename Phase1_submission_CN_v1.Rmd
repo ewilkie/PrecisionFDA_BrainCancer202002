@@ -27,7 +27,7 @@ library(pROC) # for AUC calculations
 
 ```
 
-# Subchallenge 1 - Gene Expression
+# Subchallenge 2 - CN
 
 ## Cleaning data
 

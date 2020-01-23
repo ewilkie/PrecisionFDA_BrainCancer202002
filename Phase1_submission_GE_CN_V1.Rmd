@@ -38,11 +38,23 @@ library(pROC) # for AUC calculations
 Essentially need to subset the gene list. First extract all genes which are matched based on gene symbol int he HGNC database. This means that there will be other information available for these genes. 
 
 ```{r }
-Phase1_GE <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/sc1_Phase1_GE_FeatureMatrix.txt", sep="\t", header=T, row.names=1)
-gene.names <- colnames(Phase1_GE)
+##Match gene expression to Karyotype,
+Phase1_CN_GE_out <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/sc3_Phase1_CN_GE_FeatureMatrix.txt", sep="\t", header=T, row.names=1)
+dim(Phase1_CN_GE_out)
+
+y <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/sc3_Phase1_CN_GE_Outcome.txt", sep="\t", header=T, row.names=1)
+dim(y)
+
+
+cyto.ind <- grep("^X[0-9]", colnames(Phase1_CN_GE_out))
+cyto <- Phase1_CN_GE_out[,cyto.ind]
+dim(cyto)
+exp <- Phase1_CN_GE_out[,-cyto.ind]
+dim(exp)
+
 
 ## official symbols have - not .
-gene.names_sub <- gsub("\\.", "-",gene.names)
+gene.names_sub <- gsub("\\.", "-",colnames(exp))
 
 ## get data from symbol checker - generated from running the web tool (no API avail) on gene.names_sub
 h <- read.xlsx("/Users/ewilkie/Documents/PrecisionFDA/Data/hgnc-symbol-check.xlsx", sheetName=1, header=T)
@@ -99,6 +111,9 @@ eset <- ExpressionSet(assayData = t(x))
 y <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/sc1_Phase1_GE_Outcome.txt", sep="\t", header=T, row.names=1)
 design <- model.matrix(~y$SURVIVAL_STATUS)
 
+#data <- list(x,y)
+#saveRDS(data, "sc1_Phase1_GE.rds")
+
 ## calculate
 fit <- lmFit(eset, design)
 fit <- eBayes(fit, trend=TRUE, robust=TRUE)
@@ -120,10 +135,9 @@ dim(top.sig)
 ```{r }
 ## boxplot of expresion values for only DEGs
 sig <- x[,which(colnames(x) %in% rownames(top.sig))]
-## order by mean
-unexpo <- sig[,order(apply(sig, 2 , mean))]
+
 ## format for plottion
-unexpm <- melt(unexpo)
+unexpm <- melt(sig)
 colnames(unexpm) <- c("Patient", "variable", "value")
 
 ## to get order by mean
@@ -134,6 +148,31 @@ unexpm$variable <- ordered(unexpm$variable, levels = colnames(sig)[order(apply(s
 gbox <- ggplot(unexpm, aes(variable, value)) + geom_boxplot(position="dodge", outlier.size=.2)  + ggtitle("Boxplot with outliers for Gene Exprrssion in cohort") + theme(axis.text.x=element_blank())  + labs(x="Gene", y="Expression")
 print(gbox)
 ```
+
+### Extract Properties from DEGs
+
+Properties of interest are mean(expression) > 6 and SD > mean(sd(DEG)) for each gene
+
+
+```{r }
+## perform filtering
+sub_by_mean <- x[,which(apply(x,2,mean) > 6)]
+sub_by_sd <- sub_by_mean[,which(apply(sub_by_mean,2,sd) > mean(apply(sig,2,sd)))]
+dim(sub_by_sd)
+
+## format for plottion
+unexpm <- melt(sub_by_sd)
+colnames(unexpm) <- c("Patient", "variable", "value")
+
+## to get order by mean
+unexpm$variable <- factor(unexpm$variable, ordered = FALSE )
+unexpm$variable <- ordered(unexpm$variable, levels = colnames(sig)[order(apply(sig, 2 , mean))])
+
+## plot data
+gbox <- ggplot(unexpm, aes(variable, value)) + geom_boxplot(position="dodge", outlier.size=.2)  + ggtitle("Boxplot with outliers for Gene Expression in samples used for modelling") + theme(axis.text.x=element_blank())  + labs(x="Gene", y="Expression")
+print(gbox)
+```
+
 
 ## Data Modelling
 
@@ -154,7 +193,7 @@ set.seed(5627)
 options(expressions = 5e5)
 
 ## format data
-x_sub <- sig
+x_sub <- sub_by_sd
 data <- merge(x_sub, y, by="row.names")
 rownames(data) <- data[,1]
 data <- data[,-1]
@@ -165,6 +204,7 @@ dim(data)
 gbm_fit <- train(Class ~ ., data = data, method = "gbm",verbose = FALSE, metric = "ROC", trControl = ctrl)
 knn_fit <- train(Class ~ ., data = data, method = "knn", metric="ROC", trControl = ctrl)
 nb_fit <- train(Class ~ ., data = data, method = "naive_bayes", metric="ROC", trControl = ctrl)
+glmnet_fit <- train(Class ~ ., data = data, method = "glmnet", metric="ROC", trControl = ctrl)
 ```
 
 ### Plot AUC for model evelation and selection
@@ -183,7 +223,11 @@ roc_data_nb <- roc(data$Class,predict(nb_fit, data, type = "prob")[,"Dead"])
 pd_nb <- cbind(roc_data_nb$specificities,roc_data_nb$sensitivities, "NB")
 colnames(pd_nb) <- c("specificities","sensitivities", "method")
 
-pdfs <- rbind(pd_gbm,pd_knn,pd_nb)
+roc_data_glmnet <- roc(data$Class,predict(glmnet_fit, data, type = "prob")[,"Dead"])
+pd_glmnet <- cbind(roc_data_glmnet$specificities,roc_data_glmnet$sensitivities, "glmnet")
+colnames(pd_glmnet) <- c("specificities","sensitivities", "method")
+
+pdfs <- rbind(pd_gbm,pd_knn,pd_nb,pd_glmnet)
 pdfs <- as.data.frame(pdfs)
 
 ## format
