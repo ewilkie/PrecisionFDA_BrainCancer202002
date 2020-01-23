@@ -1,0 +1,186 @@
+---
+title: "Phase1_submission"
+author: "Emilie Wilkie"
+date: "22/01/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## plotting
+library(ggplot2)
+library(reshape)
+
+## deg
+library(limma)
+library(DESeq)
+library(edgeR)
+
+## modelling
+library(dplyr) # for data manipulation
+#update.packages(oldPkgs="caret", ask=FALSE)
+library(caret) # for model-building
+library(DMwR) # for smote implementation
+library(purrr) # for functional programming (map)
+library(pROC) # for AUC calculations
+
+```
+
+# Subchallenge 2 - CN
+
+## Cleaning data
+
+### Set 0 to min
+
+Initial observartion of data showed NA were likely set to 0. So need to change this first
+
+```{r }
+Phase1_CN_out <- read.table("sc2_Phase1_CN_FeatureMatrix.txt", sep="\t", header=T, row.names=1)
+
+y <- read.table("sc2_Phase1_CN_Outcome.txt", sep="\t", header=T, row.names=1)
+
+x <- Phase1_CN_out
+for(col in 1:ncol(x)){
+  minv <- min(x[-which(x[,col] == 0),col], na.rm=T)
+  x[which(x[,col] == 0),col] <- minv
+}
+
+x[x == NA] <- min(x)
+x[x == Inf] <- min(x)
+
+## check for SD
+sd <- apply(x, 2 , sd)
+x <- x[,-which(sd < 0.1)]
+
+write.table(x,"Sc1_CN_filtered.csv",  sep=",")
+
+unexpo <- x[,order(apply(x, 2 , mean))]
+dim(unexpo)
+
+## format for plottion
+unexpm <- melt(cbind(rownames(unexpo),unexpo))
+colnames(unexpm)[1] <- "Patient"
+
+gbox <- ggplot(unexpm, aes(variable, value)) + geom_boxplot(position="dodge", outlier.size=.2, colour="red")  + ggtitle("Boxplot with outliers for Chromosome Instability (CIN) in cohort") + theme(axis.text.x=element_blank())  + labs(x="Cytoband", y="CIN") + scale_y_continuous(limits =c(0,6))
+print(gbox)
+
+```
+
+
+## Data Modelling
+
+
+### Build models and assess quality. Select one for downstream.
+Create a model using four different methods. Stochastic Gradient Boosting (GMB), K-nearest neighbours (KNN), Naive Bayes (NB) and glmnet. These methods were choose after examining Phenotype data for patients. Comparing against KNN and NB allows for assessment of overfitting. Typically if KNN AUC = 1 overfitting has occured. 
+
+```{r }
+## build classifier control
+ctrl <- trainControl(method = "repeatedcv",number = 10,repeats = 5, summaryFunction = twoClassSummary, classProbs = TRUE)
+
+## change outcome variable coding
+y[which(y$SURVIVAL_STATUS == 0),] <- "Alive"
+y[which(y$SURVIVAL_STATUS == 1),] <- "Dead"
+
+## set operational parameters
+set.seed(5627)
+options(expressions = 5e5)
+
+## format data
+x_sub <- x
+data <- merge(x_sub, y, by="row.names")
+rownames(data) <- data[,1]
+data <- data[,-1]
+colnames(data)[ncol(data)] <- "Class"
+dim(data)
+
+## train data with gbm, knn and nb
+gbm_fit <- train(Class ~ ., data = data, method = "gbm",verbose = FALSE, metric = "ROC", trControl = ctrl)
+knn_fit <- train(Class ~ ., data = data, method = "knn", metric="ROC", trControl = ctrl)
+nb_fit <- train(Class ~ ., data = data, method = "naive_bayes", metric="ROC", trControl = ctrl)
+glmnet_fit <- train(Class ~ ., data = data, method = "glmnet", metric="ROC", trControl = ctrl)
+
+```
+
+### Plot AUC for model evelation and selection
+
+```{r }
+## extract and combine relevant data
+roc_data_gbm <- roc(data$Class,predict(gbm_fit, data, type = "prob")[,"Dead"])
+pd_gbm <- cbind(roc_data_gbm$specificities,roc_data_gbm$sensitivities, "GBM")
+colnames(pd_gbm) <- c("specificities","sensitivities", "method")
+
+roc_data_knn <- roc(data$Class,predict(knn_fit, data, type = "prob")[,"Dead"])
+pd_knn <- cbind(roc_data_knn$specificities,roc_data_knn$sensitivities, "KNN")
+colnames(pd_knn) <- c("specificities","sensitivities", "method")
+
+roc_data_nb <- roc(data$Class,predict(nb_fit, data, type = "prob")[,"Dead"])
+pd_nb <- cbind(roc_data_nb$specificities,roc_data_nb$sensitivities, "NB")
+colnames(pd_nb) <- c("specificities","sensitivities", "method")
+
+roc_data_glmnet <- roc(data$Class,predict(glmnet_fit, data, type = "prob")[,"Dead"])
+pd_glmnet <- cbind(roc_data_glmnet$specificities,roc_data_glmnet$sensitivities, "glmnet")
+colnames(pd_glmnet) <- c("specificities","sensitivities", "method")
+
+pdfs <- rbind(pd_gbm,pd_knn,pd_nb,pd_glmnet)
+pdfs <- as.data.frame(pdfs)
+
+## format
+pdfs$specificities <- as.numeric(as.vector(pdfs$specificities))
+pdfs$sensitivities <- as.numeric(as.vector(pdfs$sensitivities))
+
+## TO DO annotate with AUC value
+ggplot(pdfs, aes(x=specificities,y=sensitivities,colour=method)) + geom_point(size=.5) + geom_line(size=1.15) + scale_x_continuous(trans = "reverse") + ggtitle("AUC - Comparisons on Stochastic Gradient Boosting (GBM), K-nearest neighbours (KNN), Naive Bayes (NB) and glmnet")
+```
+
+
+a) Provide a description of model settings and parameters, and details of model building including dataset(s) description(s) used for training, cross validation and testing (number of samples, number of features, etc.) 
+
+
+## Detailed Best Model Accuracy Evaluation
+
+```{r }
+## predict data
+pred <- predict(glmnet_fit, data, type = "prob")
+
+## find which ones do and don't match
+comb <- cbind(pred, data$Class)
+
+check <- list()
+for (i in 1:nrow(comb)){
+  ind <- which.max(comb[i,1:2])
+  check[[i]] <- names(ind)
+}
+
+check_vec <- unlist(check)
+merg <- cbind(comb, check_vec)
+
+## classes don't match
+wrong_class <- merg[which(merg[,3] != merg[,4]),]
+
+##b) Short listed features selected by the model
+imp <- summary(gbm_fit)[which(summary(gbm_fit)$rel.inf != 0),]
+dim(imp)
+write.table(imp, "Sc2_CN_important_features.csv",  sep=",")
+
+## d) Confusion matrix
+Confusion.matrix <- confusionMatrix(as.factor(check_vec), as.factor(data$Class))
+print(Confusion.matrix$table)
+
+## e) Overall accuracy
+error_rate <- nrow(wrong_class) / length(y$SURVIVAL_STATUS)
+OA <- 1- error_rate
+print(OA)
+
+## f) Specificity 
+spec <- Confusion.matrix$byClass[2]
+print(spec)
+
+#g) Sensitivity 
+sens <- Confusion.matrix$byClass[1]
+print(sens)
+
+## h) Area under the curve (AUC)
+## plot ROC with AUC label
+plot(roc(data$Class,predict(gbm_fit, data, type = "prob")[,"Dead"]), print.auc=TRUE)
+```
