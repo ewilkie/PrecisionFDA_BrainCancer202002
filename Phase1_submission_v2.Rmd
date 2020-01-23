@@ -99,6 +99,9 @@ eset <- ExpressionSet(assayData = t(x))
 y <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/sc1_Phase1_GE_Outcome.txt", sep="\t", header=T, row.names=1)
 design <- model.matrix(~y$SURVIVAL_STATUS)
 
+#data <- list(x,y)
+#saveRDS(data, "sc1_Phase1_GE.rds")
+
 ## calculate
 fit <- lmFit(eset, design)
 fit <- eBayes(fit, trend=TRUE, robust=TRUE)
@@ -178,7 +181,7 @@ set.seed(5627)
 options(expressions = 5e5)
 
 ## format data
-x_sub <- sig
+x_sub <- sub_by_sd
 data <- merge(x_sub, y, by="row.names")
 rownames(data) <- data[,1]
 data <- data[,-1]
