@@ -32,7 +32,7 @@ library(pROC) # for AUC calculations
 
 # Subchallenge 3 - Gene Expression and CN
 
-## Import filtered data from SC1 and SC2
+## Upload and format data
 
 ```{r }
 ## read in patient data
@@ -41,22 +41,82 @@ dim(Phase1_CN_GE_out)
 
 y <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/sc3_Phase1_CN_GE_Outcome.txt", sep="\t", header=T, row.names=1)
 
-## read filtered data
-GE <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/Sc1_GE_filtered.csv", sep=",")
-CN <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/Sc1_CN_filtered.csv", sep=",")
-
-
 cyto.ind <- grep("^X[0-9]", colnames(Phase1_CN_GE_out))
 cyto <- Phase1_CN_GE_out[,cyto.ind]
 dim(cyto)
 exp <- Phase1_CN_GE_out[,-cyto.ind]
 dim(exp)
+colnames(exp) <- gsub("\\.", "-",colnames(exp))
 
-exp_filt <- exp[,which(colnames(exp) %in% GE[,1])]
-cn_filt <- cyto[,which(colnames(cyto) %in% colnames(CN))]
+hu <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/Sc1_GE_names.csv", sep=",")
+exp_filt <- exp[,which(colnames(exp) %in% hu$Input)]
 
-data <- cbind(exp_filt, cn_filt)
+```
 
+## Extract only DEGs (p.value < 0.05)
+
+```{r }
+## formatting data
+x <- exp_filt
+eset <- ExpressionSet(assayData = t(x))
+
+design <- model.matrix(~y$SURVIVAL_STATUS)
+
+## calculate
+fit <- lmFit(eset, design)
+fit <- eBayes(fit, trend=TRUE, robust=TRUE)
+results <- decideTests(fit)
+print(summary(results))
+
+## extract results
+top <- topTable(fit,n=Inf)
+top.sig <- top[which(top$adj.P.Val < 0.05),]
+
+print("Number of DEGs")
+dim(top.sig)
+
+```
+
+### Extract Properties from DEGs
+
+Properties of interest are mean(expression) > 6 and SD > mean(sd(DEG)) for each gene
+
+```{r }
+## perform filtering
+sub_by_mean <- x[,which(apply(x,2,mean) > 6)]
+sub_by_sd <- sub_by_mean[,which(apply(sub_by_mean,2,sd) > mean(apply(sig,2,sd)))]
+dim(sub_by_sd)
+
+## format for plottion
+unexpm <- melt(cbind(rownames(sub_by_sd), sub_by_sd))
+colnames(unexpm) <- c("Patient", "variable", "value")
+
+## to get order by mean
+unexpm$variable <- factor(unexpm$variable, ordered = FALSE )
+unexpm$variable <- ordered(unexpm$variable, levels = colnames(sig)[order(apply(sig, 2 , mean))])
+
+## plot data
+gbox <- ggplot(unexpm, aes(variable, value)) + geom_boxplot(position="dodge", outlier.size=.2)  + ggtitle("Boxplot with outliers for Gene Expression in samples used for modelling") + theme(axis.text.x=element_blank())  + labs(x="Gene", y="Expression")
+print(gbox)
+```
+
+## Format CN data
+
+```{r }
+x <- cyto
+for(col in 1:ncol(x)){
+  minv <- min(x[-which(x[,col] == 0),col], na.rm=T)
+  x[which(x[,col] == 0),col] <- minv
+}
+
+x[x == NA] <- min(x)
+x[x == Inf] <- min(x)
+
+## check for SD
+sd <- apply(x, 2 , sd)
+x <- x[,-which(sd < 0.1)]
+
+data <- cbind(sub_by_sd, x)
 ```
 
 

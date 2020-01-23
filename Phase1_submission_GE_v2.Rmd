@@ -68,6 +68,9 @@ hu <- h[-which(h$Input %in% alias$Input),]
 hu <- rbind(hu, aliasu)
 dim(hu)
 
+## save output
+write.table(hu,"/Users/ewilkie/Documents/PrecisionFDA/Data/Sc1_GE_names.csv",  sep=",")
+
 ```
 
 ### Plotting of expression values for filtered genes 
@@ -141,15 +144,11 @@ print(gbox)
 
 Properties of interest are mean(expression) > 6 and SD > mean(sd(DEG)) for each gene
 
-
 ```{r }
 ## perform filtering
 sub_by_mean <- x[,which(apply(x,2,mean) > 6)]
 sub_by_sd <- sub_by_mean[,which(apply(sub_by_mean,2,sd) > mean(apply(sig,2,sd)))]
 dim(sub_by_sd)
-
-## save output
-write.table(sub_by_sd,"/Users/ewilkie/Documents/PrecisionFDA/Data/Sc1_GE_filtered.csv",  sep=",")
 
 ## format for plottion
 unexpm <- melt(sub_by_sd)
