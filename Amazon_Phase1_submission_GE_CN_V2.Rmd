@@ -33,10 +33,10 @@ library(pROC) # for AUC calculations
 
 ```{r }
 ## read in patient data
-Phase1_CN_GE_out <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/sc3_Phase1_CN_GE_FeatureMatrix.txt", sep="\t", header=T, row.names=1)
+Phase1_CN_GE_out <- read.table("sc3_Phase1_CN_GE_FeatureMatrix.txt", sep="\t", header=T, row.names=1)
 dim(Phase1_CN_GE_out)
 
-y <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/sc3_Phase1_CN_GE_Outcome.txt", sep="\t", header=T, row.names=1)
+y <- read.table("sc3_Phase1_CN_GE_Outcome.txt", sep="\t", header=T, row.names=1)
 
 cyto.ind <- grep("^X[0-9]", colnames(Phase1_CN_GE_out))
 cyto <- Phase1_CN_GE_out[,cyto.ind]
@@ -45,7 +45,7 @@ exp <- Phase1_CN_GE_out[,-cyto.ind]
 dim(exp)
 colnames(exp) <- gsub("\\.", "-",colnames(exp))
 
-hu <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/Sc1_GE_names.csv", sep=",")
+hu <- read.table("Sc1_GE_names.csv", sep=",")
 exp_filt <- exp[,which(colnames(exp) %in% hu$Input)]
 
 ```
@@ -198,7 +198,7 @@ wrong_class <- merg[which(merg[,3] != merg[,4]),]
 
 ##b) Short listed features selected by the model
 imp <- summary(gbm_fit)[which(summary(gbm_fit)$rel.inf != 0),]
-write.table(imp, "/Users/ewilkie/Documents/PrecisionFDA/Data/Sc3_GE_CN_important_features.csv",  sep=",")
+write.table(imp, "Sc3_GE_CN_important_features.csv",  sep=",")
 
 ## d) Confusion matrix
 Confusion.matrix <- confusionMatrix(as.factor(check_vec), as.factor(data$Class))
