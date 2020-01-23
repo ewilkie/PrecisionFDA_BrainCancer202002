@@ -50,17 +50,15 @@ h <- read.xlsx("/Users/ewilkie/Documents/PrecisionFDA/Data/hgnc-symbol-check.xls
 
 ## find Unmatched
 unmatched <- h[which(h$Match.type == "Unmatched"),]
-dim(unmatched)
 print("Number of Unmatched gene names:")
+dim(unmatched)
 #[1] 719   7
 
 ## find Alias symbol
 alias <- h[which(h$Match.type == "Alias symbol"),]
 
-
 ## find these can be duplicates of Approved symbol
 dup <- h[which(h$Input %in% alias$Input),]
-head(dup)
 dup_name <- as.vector(dup$Input[duplicated(dup$Input)])
 
 ## these are not duplicated
@@ -82,13 +80,12 @@ dim(unexp)
 
 ## order and colour data by mean
 unexpo <- unexp[,order(apply(unexp, 2 , mean))]
-dim(unexpo)
 
 ## format for plottion
 unexpm <- melt(cbind(rownames(unexpo),unexpo))
 colnames(unexpm)[1] <- "Patient"
 
-gbox <- ggplot(unexpm, aes(variable, value)) + geom_boxplot(position="dodge", outlier.size=.2)
+gbox <- ggplot(unexpm, aes(variable, value)) + geom_boxplot(position="dodge", outlier.size=.2) + ggtitle("Boxplot of Unmatched Genes with outliers for Gene Exprrssion in cohort") + theme(axis.text.x=element_blank())  + labs(x="Unmatched Gene", y="Expression")
 print(gbox)
 ```
 
@@ -191,12 +188,11 @@ pdfs <- rbind(pd_gbm,pd_knn,pd_nb)
 pdfs <- as.data.frame(pdfs)
 
 ## format
-str(pdfs)
 pdfs$specificities <- as.numeric(as.vector(pdfs$specificities))
 pdfs$sensitivities <- as.numeric(as.vector(pdfs$sensitivities))
 
 ## TO DO annotate with AUC value
-ggplot(pdfs, aes(x=specificities,y=sensitivities,colour=method)) + geom_point(size=.5) + geom_line(size=1.15) + scale_x_continuous(trans = "reverse") + ggtitle("AUC - Comparisons on Stochastic Gradient Boosting (GMB), K-nearest neighbours (KNN) and Naive Bayes (NB)")
+ggplot(pdfs, aes(x=specificities,y=sensitivities,colour=method)) + geom_point(size=.5) + geom_line(size=1.15) + scale_x_continuous(trans = "reverse") + ggtitle("AUC - Comparisons on Stochastic Gradient Boosting (GBM), K-nearest neighbours (KNN) and Naive Bayes (NB)")
 ```
 
 
@@ -224,7 +220,6 @@ merg <- cbind(comb, check_vec)
 ## classes don't match
 wrong_class <- merg[which(merg[,3] != merg[,4]),]
 
-
 ##b) Short listed features selected by the model
 impgenes <- summary(gbm_fit)[which(summary(gbm_fit)$rel.inf != 0),]
 dim(impgenes)
@@ -247,5 +242,5 @@ print(ss)
 
 ## h) Area under the curve (AUC)
 ## plot ROC with AUC label
-plot(roc_full_resolution, print.auc=TRUE)
+plot(roc(data$Class,predict(gbm_fit, data, type = "prob")[,"Dead"]), print.auc=TRUE)
 ```
