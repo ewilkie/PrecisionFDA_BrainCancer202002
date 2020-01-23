@@ -159,8 +159,10 @@ merg <- cbind(comb, check_vec)
 wrong_class <- merg[which(merg[,3] != merg[,4]),]
 
 ##b) Short listed features selected by the model
-impgenes <- summary(gbm_fit)[which(summary(gbm_fit)$rel.inf != 0),]
-dim(impgenes)
+imp <- summary(gbm_fit)[which(summary(gbm_fit)$rel.inf != 0),]
+dim(imp)
+
+write.table(imp, "/Users/ewilkie/Documents/PrecisionFDA/Data/Sc1_CN_important_features.csv",  sep=",")
 
 ## d) Confusion matrix indicating number of predictions, true positives, false positives, true negatives, and false negatives                       
 Confusion.matrix <- table(y$SURVIVAL_STATUS,check_vec)

@@ -8,9 +8,6 @@ output: html_document
 ```{r setup, include=FALSE, echo=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
-## data io
-library(xlsx)
-
 ## plotting
 library(ggplot2)
 library(reshape)
@@ -83,21 +80,10 @@ Properties of interest are mean(expression) > 6 and SD > mean(sd(DEG)) for each 
 
 ```{r }
 ## perform filtering
+sig <-  x[,which(colnames(x) %in% rownames(top.sig))]
 sub_by_mean <- x[,which(apply(x,2,mean) > 6)]
 sub_by_sd <- sub_by_mean[,which(apply(sub_by_mean,2,sd) > mean(apply(sig,2,sd)))]
 dim(sub_by_sd)
-
-## format for plottion
-unexpm <- melt(cbind(rownames(sub_by_sd), sub_by_sd))
-colnames(unexpm) <- c("Patient", "variable", "value")
-
-## to get order by mean
-unexpm$variable <- factor(unexpm$variable, ordered = FALSE )
-unexpm$variable <- ordered(unexpm$variable, levels = colnames(sig)[order(apply(sig, 2 , mean))])
-
-## plot data
-gbox <- ggplot(unexpm, aes(variable, value)) + geom_boxplot(position="dodge", outlier.size=.2)  + ggtitle("Boxplot with outliers for Gene Expression in samples used for modelling") + theme(axis.text.x=element_blank())  + labs(x="Gene", y="Expression")
-print(gbox)
 ```
 
 ## Format CN data
