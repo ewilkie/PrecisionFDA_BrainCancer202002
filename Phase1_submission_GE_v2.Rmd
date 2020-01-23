@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 
 ## data io
-library(xlsx)
+#library(xlsx)
 
 ## plotting
 library(ggplot2)
@@ -45,7 +45,7 @@ gene.names <- colnames(Phase1_GE)
 gene.names_sub <- gsub("\\.", "-",gene.names)
 
 ## get data from symbol checker - generated from running the web tool (no API avail) on gene.names_sub
-h <- read.xlsx("/Users/ewilkie/Documents/PrecisionFDA/Data/hgnc-symbol-check.xlsx", sheetName=1, header=T)
+h <- read.table("/Users/ewilkie/Documents/PrecisionFDA/Data/hgnc-symbol-check.txt", header=T, sep="\t", quote= "")
 
 ## find Unmatched
 unmatched <- h[which(h$Match.type == "Unmatched"),]
@@ -257,21 +257,22 @@ wrong_class <- merg[which(merg[,3] != merg[,4]),]
 impgenes <- summary(gbm_fit)[which(summary(gbm_fit)$rel.inf != 0),]
 dim(impgenes)
 
-## d) Confusion matrix indicating number of predictions, true positives, false positives, true negatives, and false negatives                       
-Confusion.matrix <- table(y$SURVIVAL_STATUS,check_vec)
-rownames(Confusion.matrix) <- c("TP", "FN")
-colnames(Confusion.matrix) <- c("FP" ,"TN")
-print(Confusion.matrix)
+## d) Confusion matrix
+Confusion.matrix <- confusionMatrix(as.factor(check_vec), as.factor(data$Class))
+print(Confusion.matrix$table)
 
 ## e) Overall accuracy
 error_rate <- nrow(wrong_class) / length(y$SURVIVAL_STATUS)
 OA <- 1- error_rate
 print(OA)
 
-## f) Specificity g) Sensitivity 
-w <- which(gbm_fit$results$n.trees == gbm_fit$bestTune$n.trees & gbm_fit$results$interaction.depth == gbm_fit$bestTune$interaction.depth & gbm_fit$results$shrinkage == gbm_fit$bestTune$shrinkage & gbm_fit$results$n.minobsinnode == gbm_fit$bestTune$n.minobsinnode)
-ss <- gbm_fit$results[w,c("ROC","Sens","Spec")]
-print(ss)
+## f) Specificity 
+spec <- Confusion.matrix$byClass[2]
+print(spec)
+
+#g) Sensitivity 
+sens <- Confusion.matrix$byClass[1]
+print(sens)
 
 ## h) Area under the curve (AUC)
 ## plot ROC with AUC label

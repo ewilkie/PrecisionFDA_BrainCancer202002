@@ -103,6 +103,7 @@ sd <- apply(x, 2 , sd)
 x <- x[,-which(sd < 0.1)]
 
 data <- cbind(sub_by_sd, x)
+dim(data)
 ```
 
 
@@ -196,24 +197,25 @@ merg <- cbind(comb, check_vec)
 wrong_class <- merg[which(merg[,3] != merg[,4]),]
 
 ##b) Short listed features selected by the model
-impgenes <- summary(gbm_fit)[which(summary(gbm_fit)$rel.inf != 0),]
-dim(impgenes)
+imp <- summary(gbm_fit)[which(summary(gbm_fit)$rel.inf != 0),]
+write.table(imp, "/Users/ewilkie/Documents/PrecisionFDA/Data/Sc3_GE_CN_important_features.csv",  sep=",")
 
-## d) Confusion matrix indicating number of predictions, true positives, false positives, true negatives, and false negatives                       
-Confusion.matrix <- table(y$SURVIVAL_STATUS,check_vec)
-rownames(Confusion.matrix) <- c("TP", "FN")
-colnames(Confusion.matrix) <- c("FP" ,"TN")
-print(Confusion.matrix)
+## d) Confusion matrix
+Confusion.matrix <- confusionMatrix(as.factor(check_vec), as.factor(data$Class))
+print(Confusion.matrix$table)
 
 ## e) Overall accuracy
 error_rate <- nrow(wrong_class) / length(y$SURVIVAL_STATUS)
 OA <- 1- error_rate
 print(OA)
 
-## f) Specificity g) Sensitivity 
-w <- which(gbm_fit$results$n.trees == gbm_fit$bestTune$n.trees & gbm_fit$results$interaction.depth == gbm_fit$bestTune$interaction.depth & gbm_fit$results$shrinkage == gbm_fit$bestTune$shrinkage & gbm_fit$results$n.minobsinnode == gbm_fit$bestTune$n.minobsinnode)
-ss <- gbm_fit$results[w,c("ROC","Sens","Spec")]
-print(ss)
+## f) Specificity 
+spec <- Confusion.matrix$byClass[2]
+print(spec)
+
+#g) Sensitivity 
+sens <- Confusion.matrix$byClass[1]
+print(sens)
 
 ## h) Area under the curve (AUC)
 ## plot ROC with AUC label
