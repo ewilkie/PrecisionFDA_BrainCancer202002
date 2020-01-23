@@ -1,0 +1,281 @@
+---
+title: "Phase1_submission"
+author: "Emilie Wilkie"
+date: "22/01/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## data io
+#library(xlsx)
+
+## plotting
+library(ggplot2)
+library(reshape)
+
+## deg
+library(limma)
+library(DESeq)
+library(edgeR)
+
+## modelling
+library(dplyr) # for data manipulation
+#update.packages(oldPkgs="caret", ask=FALSE)
+library(caret) # for model-building
+library(DMwR) # for smote implementation
+library(purrr) # for functional programming (map)
+library(pROC) # for AUC calculations
+
+```
+
+# Subchallenge 1 - Gene Expression
+
+## Cleaning data
+
+### Annotation based filtering
+Essentially need to subset the gene list. First extract all genes which are matched based on gene symbol int he HGNC database. This means that there will be other information available for these genes. 
+
+```{r }
+Phase1_GE <- read.table("sc1_Phase1_GE_FeatureMatrix.txt", sep="\t", header=T, row.names=1)
+gene.names <- colnames(Phase1_GE)
+
+## official symbols have - not .
+gene.names_sub <- gsub("\\.", "-",gene.names)
+
+## get data from symbol checker - generated from running the web tool (no API avail) on gene.names_sub
+h <- read.table("hgnc-symbol-check.txt", header=T, sep="\t", quote= "")
+
+## find Unmatched
+unmatched <- h[which(h$Match.type == "Unmatched"),]
+print("Number of Unmatched gene names:")
+dim(unmatched)
+#[1] 719   7
+
+## find Alias symbol
+alias <- h[which(h$Match.type == "Alias symbol"),]
+
+## find these can be duplicates of Approved symbol
+dup <- h[which(h$Input %in% alias$Input),]
+dup_name <- as.vector(dup$Input[duplicated(dup$Input)])
+
+## these are not duplicated
+aliasu <- alias[-which(alias$Input %in% dup_name),]
+
+## combine to creat unique
+hu <- h[-which(h$Input %in% alias$Input),]
+hu <- rbind(hu, aliasu)
+dim(hu)
+
+## save output
+write.table(hu,"Sc1_GE_names.csv",  sep=",")
+
+```
+
+### Plotting of expression values for filtered genes 
+Does doing this exclude important information?
+
+```{r }
+unexp <- Phase1_GE[,which(colnames(Phase1_GE) %in% unmatched$Input)]
+dim(unexp)
+
+## order and colour data by mean
+unexpo <- unexp[,order(apply(unexp, 2 , mean))]
+
+## format for plottion
+unexpm <- melt(cbind(rownames(unexpo),unexpo))
+colnames(unexpm)[1] <- "Patient"
+
+gbox <- ggplot(unexpm, aes(variable, value)) + geom_boxplot(position="dodge", outlier.size=.2) + ggtitle("Boxplot of Unmatched Genes with outliers for Gene Exprrssion in cohort") + theme(axis.text.x=element_blank())  + labs(x="Unmatched Gene", y="Expression")
+print(gbox)
+```
+
+### Subset further - Extract only DEGs (p.value < 0.05)
+
+```{r }
+## formatting data
+x <- as.matrix(Phase1_GE[,which(colnames(Phase1_GE) %in% hu$Input)])
+eset <- ExpressionSet(assayData = t(x))
+
+## for comparison
+y <- read.table("sc1_Phase1_GE_Outcome.txt", sep="\t", header=T, row.names=1)
+design <- model.matrix(~y$SURVIVAL_STATUS)
+
+#data <- list(x,y)
+#saveRDS(data, "sc1_Phase1_GE.rds")
+
+## calculate
+fit <- lmFit(eset, design)
+fit <- eBayes(fit, trend=TRUE, robust=TRUE)
+results <- decideTests(fit)
+print(summary(results))
+
+## extract results
+top <- topTable(fit,n=Inf)
+top.sig <- top[which(top$adj.P.Val < 0.05),]
+
+print("Number of DEGs")
+dim(top.sig)
+##[1] 893   7
+
+```
+
+### PLot expression range of DEGs
+
+```{r }
+## boxplot of expresion values for only DEGs
+sig <- x[,which(colnames(x) %in% rownames(top.sig))]
+
+## format for plottion
+unexpm <- melt(sig)
+colnames(unexpm) <- c("Patient", "variable", "value")
+
+## to get order by mean
+unexpm$variable <- factor(unexpm$variable, ordered = FALSE )
+unexpm$variable <- ordered(unexpm$variable, levels = colnames(sig)[order(apply(sig, 2 , mean))])
+
+## plot data
+gbox <- ggplot(unexpm, aes(variable, value)) + geom_boxplot(position="dodge", outlier.size=.2)  + ggtitle("Boxplot with outliers for Gene Exprrssion in cohort") + theme(axis.text.x=element_blank())  + labs(x="Gene", y="Expression")
+print(gbox)
+```
+
+### Extract Properties from DEGs
+
+Properties of interest are mean(expression) > 6 and SD > mean(sd(DEG)) for each gene
+
+```{r }
+## perform filtering
+sub_by_mean <- x[,which(apply(x,2,mean) > 6)]
+sub_by_sd <- sub_by_mean[,which(apply(sub_by_mean,2,sd) > mean(apply(sig,2,sd)))]
+dim(sub_by_sd)
+
+## format for plottion
+unexpm <- melt(sub_by_sd)
+colnames(unexpm) <- c("Patient", "variable", "value")
+
+## to get order by mean
+unexpm$variable <- factor(unexpm$variable, ordered = FALSE )
+unexpm$variable <- ordered(unexpm$variable, levels = colnames(sig)[order(apply(sig, 2 , mean))])
+
+## plot data
+gbox <- ggplot(unexpm, aes(variable, value)) + geom_boxplot(position="dodge", outlier.size=.2)  + ggtitle("Boxplot with outliers for Gene Expression in samples used for modelling") + theme(axis.text.x=element_blank())  + labs(x="Gene", y="Expression")
+print(gbox)
+```
+
+
+## Data Modelling
+
+
+### Build models and assess quality. Select one for downstream.
+Create a model using three different methods. Stochastic Gradient Boosting (GMB), K-nearest neighbours (KNN) and Naive Bayes (NB). These methods were choose after examining Phenotype data for patients. Comparing against KNN and NB allows for assessment of overfitting. Typically if KNN AUC = 1 overfitting has occured. 
+
+```{r }
+## build classifier control
+ctrl <- trainControl(method = "repeatedcv",number = 10,repeats = 5, summaryFunction = twoClassSummary, classProbs = TRUE)
+
+## change outcome variable coding
+y[which(y$SURVIVAL_STATUS == 0),] <- "Alive"
+y[which(y$SURVIVAL_STATUS == 1),] <- "Dead"
+
+## set operational parameters
+set.seed(5627)
+options(expressions = 5e5)
+
+## format data
+x_sub <- sub_by_sd
+data <- merge(x_sub, y, by="row.names")
+rownames(data) <- data[,1]
+data <- data[,-1]
+colnames(data)[ncol(data)] <- "Class"
+dim(data)
+
+## train data with gbm, knn and nb
+gbm_fit <- train(Class ~ ., data = data, method = "gbm",verbose = FALSE, metric = "ROC", trControl = ctrl)
+knn_fit <- train(Class ~ ., data = data, method = "knn", metric="ROC", trControl = ctrl)
+nb_fit <- train(Class ~ ., data = data, method = "naive_bayes", metric="ROC", trControl = ctrl)
+glmnet_fit <- train(Class ~ ., data = data, method = "glmnet", metric="ROC", trControl = ctrl)
+```
+
+### Plot AUC for model evelation and selection
+
+```{r }
+## extract and combine relevant data
+roc_data_gbm <- roc(data$Class,predict(gbm_fit, data, type = "prob")[,"Dead"])
+pd_gbm <- cbind(roc_data_gbm$specificities,roc_data_gbm$sensitivities, "GBM")
+colnames(pd_gbm) <- c("specificities","sensitivities", "method")
+
+roc_data_knn <- roc(data$Class,predict(knn_fit, data, type = "prob")[,"Dead"])
+pd_knn <- cbind(roc_data_knn$specificities,roc_data_knn$sensitivities, "KNN")
+colnames(pd_knn) <- c("specificities","sensitivities", "method")
+
+roc_data_nb <- roc(data$Class,predict(nb_fit, data, type = "prob")[,"Dead"])
+pd_nb <- cbind(roc_data_nb$specificities,roc_data_nb$sensitivities, "NB")
+colnames(pd_nb) <- c("specificities","sensitivities", "method")
+
+roc_data_glmnet <- roc(data$Class,predict(glmnet_fit, data, type = "prob")[,"Dead"])
+pd_glmnet <- cbind(roc_data_glmnet$specificities,roc_data_glmnet$sensitivities, "glmnet")
+colnames(pd_glmnet) <- c("specificities","sensitivities", "method")
+
+pdfs <- rbind(pd_gbm,pd_knn,pd_nb,pd_glmnet)
+pdfs <- as.data.frame(pdfs)
+
+## format
+pdfs$specificities <- as.numeric(as.vector(pdfs$specificities))
+pdfs$sensitivities <- as.numeric(as.vector(pdfs$sensitivities))
+
+## TO DO annotate with AUC value
+ggplot(pdfs, aes(x=specificities,y=sensitivities,colour=method)) + geom_point(size=.5) + geom_line(size=1.15) + scale_x_continuous(trans = "reverse") + ggtitle("AUC - Comparisons on Stochastic Gradient Boosting (GBM), K-nearest neighbours (KNN) and Naive Bayes (NB)")
+```
+
+
+a) Provide a description of model settings and parameters, and details of model building including dataset(s) description(s) used for training, cross validation and testing (number of samples, number of features, etc.) 
+
+
+## Detailed Best Model Accuracy Evaluation
+
+```{r }
+## predict data
+pred <- predict(gbm_fit, data, type = "prob")
+
+## find which ones do and don't match
+comb <- cbind(pred, data$Class)
+
+check <- list()
+for (i in 1:nrow(comb)){
+  ind <- which.max(comb[i,1:2])
+  check[[i]] <- names(ind)
+}
+
+check_vec <- unlist(check)
+merg <- cbind(comb, check_vec)
+
+## classes don't match
+wrong_class <- merg[which(merg[,3] != merg[,4]),]
+
+##b) Short listed features selected by the model
+impgenes <- summary(gbm_fit)[which(summary(gbm_fit)$rel.inf != 0),]
+dim(impgenes)
+write.table(impgenes, "SC1_GE_important_features.csv", sep=",", quote=F)
+
+## d) Confusion matrix
+Confusion.matrix <- confusionMatrix(as.factor(check_vec), as.factor(data$Class))
+print(Confusion.matrix$table)
+
+## e) Overall accuracy
+error_rate <- nrow(wrong_class) / length(y$SURVIVAL_STATUS)
+OA <- 1- error_rate
+print(OA)
+
+## f) Specificity 
+spec <- Confusion.matrix$byClass[2]
+print(spec)
+
+#g) Sensitivity 
+sens <- Confusion.matrix$byClass[1]
+print(sens)
+
+## h) Area under the curve (AUC)
+## plot ROC with AUC label
+plot(roc(data$Class,predict(gbm_fit, data, type = "prob")[,"Dead"]), print.auc=TRUE)
+```
